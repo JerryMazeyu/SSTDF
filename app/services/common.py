@@ -10,6 +10,7 @@ import torch
 import torch.nn as nn
 import json
 import time
+import importlib.util
 from typing import Dict, List, Optional, Tuple, Generator
 from dataclasses import dataclass
 from datetime import datetime
@@ -40,53 +41,159 @@ class ModelInfo:
 
 
 class ModelRegistry:
-    """模型注册管理器"""
+    """基于文件系统的模型管理器"""
     
-    def __init__(self):
-        self._models: Dict[str, ModelInfo] = {}
+    def __init__(self, models_dir: str = "./models"):
+        self.models_dir = models_dir
         self._running_models: Dict[str, object] = {}  # 存储实际加载的模型对象
+        self._model_status: Dict[str, str] = {}  # 存储模型状态
+        self._scan_models()
         
-    def register_model(self, name: str, path: str, framework: str = 'pytorch') -> bool:
-        """注册一个模型"""
-        try:
-            if name in self._models:
-                logger.warning(f"模型 {name} 已存在，将覆盖原有注册")
-                
-            model_info = ModelInfo(
-                name=name,
-                path=path,
-                framework=framework,
-                status='stopped'
-            )
-            self._models[name] = model_info
-            logger.info(f"成功注册模型: {name}")
-            return True
+    def _scan_models(self):
+        """扫描models目录，发现可用的模型"""
+        self._available_models = {}
+        
+        if not os.path.exists(self.models_dir):
+            logger.warning(f"模型目录不存在: {self.models_dir}")
+            return
             
+        try:
+            for model_id in os.listdir(self.models_dir):
+                model_path = os.path.join(self.models_dir, model_id)
+                if os.path.isdir(model_path):
+                    conf_file = os.path.join(model_path, "conf.json")
+                    model_file = os.path.join(model_path, "model.py")
+                    
+                    if os.path.exists(conf_file) and os.path.exists(model_file):
+                        try:
+                            with open(conf_file, 'r', encoding='utf-8') as f:
+                                config = json.load(f)
+                            
+                            model_info = ModelInfo(
+                                name=config.get('name', model_id),
+                                path=model_path,
+                                framework=config.get('framework', 'unknown'),
+                                status=self._model_status.get(model_id, 'stopped')
+                            )
+                            
+                            # 添加额外信息
+                            model_info.model_id = model_id
+                            model_info.config = config
+                            model_info.description = config.get('description', '')
+                            model_info.version = config.get('version', '1.0.0')
+                            model_info.model_type = config.get('model_type', 'unknown')
+                            
+                            self._available_models[model_id] = model_info
+                            logger.debug(f"发现模型: {model_info.name} ({model_id})")
+                            
+                        except json.JSONDecodeError as e:
+                            logger.error(f"解析模型配置失败 {conf_file}: {e}")
+                        except Exception as e:
+                            logger.error(f"加载模型信息失败 {model_path}: {e}")
+                            
         except Exception as e:
-            logger.error(f"注册模型失败: {str(e)}")
-            return False
+            logger.error(f"扫描模型目录失败: {e}")
             
     def list_models(self) -> List[Dict]:
-        """列出所有已注册的模型"""
-        return [model.to_dict() for model in self._models.values()]
+        """列出所有可用的模型"""
+        self._scan_models()  # 重新扫描以获取最新状态
+        models = []
+        for model_info in self._available_models.values():
+            model_dict = model_info.to_dict()
+            model_dict.update({
+                'model_id': model_info.model_id,
+                'description': model_info.description,
+                'version': model_info.version,
+                'model_type': model_info.model_type,
+                'config': model_info.config
+            })
+            models.append(model_dict)
+        return models
         
-    def get_model_info(self, name: str) -> Optional[Dict]:
+    def get_model_info(self, model_id: str) -> Optional[Dict]:
         """获取指定模型的信息"""
-        if name in self._models:
-            return self._models[name].to_dict()
+        self._scan_models()
+        if model_id in self._available_models:
+            model_info = self._available_models[model_id]
+            model_dict = model_info.to_dict()
+            model_dict.update({
+                'model_id': model_info.model_id,
+                'description': model_info.description,
+                'version': model_info.version,
+                'model_type': model_info.model_type,
+                'config': model_info.config
+            })
+            return model_dict
         return None
         
-    def update_model_status(self, name: str, status: str, device: Optional[str] = None):
+    def update_model_status(self, model_id: str, status: str, device: Optional[str] = None):
         """更新模型状态"""
-        if name in self._models:
-            self._models[name].status = status
+        self._model_status[model_id] = status
+        if model_id in self._available_models:
+            self._available_models[model_id].status = status
             if status == 'running':
-                self._models[name].loaded_time = datetime.now()
+                self._available_models[model_id].loaded_time = datetime.now()
                 if device:
-                    self._models[name].device = device
+                    self._available_models[model_id].device = device
             elif status == 'stopped':
-                self._models[name].loaded_time = None
-                self._models[name].device = None
+                self._available_models[model_id].loaded_time = None
+                self._available_models[model_id].device = None
+                
+    def is_empty(self) -> bool:
+        """检查是否没有可用的模型"""
+        self._scan_models()
+        return len(self._available_models) == 0
+        
+    def load_model_inference(self, model_id: str):
+        """动态加载模型的推理函数"""
+        if model_id not in self._available_models:
+            raise ValueError(f"模型 {model_id} 不存在")
+            
+        model_path = self._available_models[model_id].path
+        model_file = os.path.join(model_path, "model.py")
+        
+        if not os.path.exists(model_file):
+            raise FileNotFoundError(f"模型文件不存在: {model_file}")
+            
+        # 动态导入模型模块
+        import importlib.util
+        import sys
+        
+        spec = importlib.util.spec_from_file_location(f"model_{model_id}", model_file)
+        if spec is None or spec.loader is None:
+            raise ImportError(f"无法加载模型模块: {model_file}")
+            
+        module = importlib.util.module_from_spec(spec)
+        sys.modules[f"model_{model_id}"] = module
+        spec.loader.exec_module(module)
+        
+        if not hasattr(module, 'inference'):
+            raise AttributeError(f"模型 {model_id} 缺少 inference 函数")
+            
+        return module.inference
+        
+    def test_model(self, model_id: str, test_image_path: str) -> Dict:
+        """测试模型推理功能"""
+        try:
+            inference_func = self.load_model_inference(model_id)
+            result = inference_func(test_image_path)
+            
+            # 添加测试信息
+            result['test_image'] = test_image_path
+            result['model_id'] = model_id
+            result['tested_at'] = datetime.now().isoformat()
+            
+            return result
+            
+        except Exception as e:
+            logger.error(f"模型测试失败 {model_id}: {e}")
+            return {
+                "success": False,
+                "error": f"模型测试失败: {str(e)}",
+                "model_id": model_id,
+                "test_image": test_image_path,
+                "tested_at": datetime.now().isoformat()
+            }
 
 
 # 全局模型注册器实例
@@ -343,22 +450,4 @@ def load_model_from_path(model_path: str, model_class: Optional[type] = None) ->
         return None
 
 
-# 初始化时注册一些示例模型（用于测试）
-def init_sample_models():
-    """初始化示例模型（仅用于测试）"""
-    sample_models = [
-        ("YOLO-v5", "/models/yolov5.pt", "pytorch"),
-        ("ResNet-50", "/models/resnet50.pth", "pytorch"),
-        ("EfficientNet-B0", "/models/efficientnet_b0.pth", "pytorch"),
-        ("MobileNet-v2", "/models/mobilenet_v2.onnx", "onnx"),
-    ]
-    
-    for name, path, framework in sample_models:
-        model_registry.register_model(name, path, framework)
-        # 模拟一些模型正在运行
-        if name in ["YOLO-v5", "ResNet-50"]:
-            model_registry.update_model_status(name, "running", "cuda:0")
 
-
-# 初始化
-init_sample_models()

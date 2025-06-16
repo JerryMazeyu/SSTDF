@@ -4,6 +4,8 @@ from PyQt5.QtWidgets import (QMainWindow, QVBoxLayout, QHBoxLayout, QWidget,
 from PyQt5.QtCore import Qt, QSize, QTimer
 from PyQt5.QtGui import QIcon
 import logging
+from app.services import model_registry, config_manager
+from app.views.dialogs.model_manager_dialog import ModelManagerDialog
 
 # 导入各个功能标签页（预留）
 try:
@@ -103,6 +105,9 @@ class MainWindow(QMainWindow):
         # 定时器用于延迟设置按钮位置（确保tab_widget已正确渲染）
         QTimer.singleShot(100, self.adjust_settings_button_position)
         
+        # 检查是否有已注册的模型
+        QTimer.singleShot(500, self.check_models)
+        
     def setup_tabs(self):
         """设置各个功能标签页"""
         # Tab 1: 异常检测
@@ -159,8 +164,13 @@ class MainWindow(QMainWindow):
             }
         """)
         
+        # 添加模型管理选项
+        model_action = QAction("🤖 模型管理", self)
+        model_action.triggered.connect(self.open_model_manager)
+        menu.addAction(model_action)
+        
         # 添加设置选项
-        settings_action = QAction("⚙️ 设置", self)
+        settings_action = QAction("⚙️ 系统设置", self)
         settings_action.triggered.connect(self.open_settings)
         menu.addAction(settings_action)
         
@@ -231,6 +241,39 @@ class MainWindow(QMainWindow):
             self.logger.info("程序正常退出")
         else:
             event.ignore()
+    
+    def check_models(self):
+        """检查是否有可用的模型"""
+        if model_registry.is_empty():
+            reply = QMessageBox.question(
+                self,
+                "未找到可用模型",
+                "系统中还没有发现任何模型。\n请确保在models/目录下放置了正确格式的模型。\n是否打开模型管理查看？",
+                QMessageBox.Yes | QMessageBox.No,
+                QMessageBox.Yes
+            )
+            
+            if reply == QMessageBox.Yes:
+                self.open_model_manager()
+    
+    def open_model_manager(self):
+        """打开模型管理对话框"""
+        dialog = ModelManagerDialog(self)
+        dialog.models_updated.connect(self.on_models_updated)
+        dialog.exec_()
+    
+    def on_models_updated(self):
+        """模型列表更新后的处理"""
+        # 通知各个标签页更新模型列表
+        if hasattr(self, 'tab1') and self.tab1:
+            if hasattr(self.tab1, 'refresh_model_list'):
+                self.tab1.refresh_model_list()
+        
+        if hasattr(self, 'tab2') and self.tab2:
+            if hasattr(self.tab2, 'refresh_model_list'):
+                self.tab2.refresh_model_list()
+        
+        self.logger.info("模型列表已更新")
 
 
 def create_main_window():

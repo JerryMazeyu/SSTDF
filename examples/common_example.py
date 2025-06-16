@@ -33,64 +33,85 @@ except ImportError as e:
 
 
 def test_model_registry():
-    """测试模型注册器功能"""
+    """测试基于文件系统的模型管理器功能"""
     print("=" * 60)
-    print("测试模型注册器功能")
+    print("测试基于文件系统的模型管理器功能")
     print("=" * 60)
     
-    # 1. 注册模型
-    print("\n1. 注册模型:")
-    models_to_register = [
-        ("YOLOv5-Small", "/models/yolov5s.pt", "pytorch"),
-        ("ResNet18", "/models/resnet18.pth", "pytorch"),
-        ("EfficientNet", "/models/efficientnet.onnx", "onnx"),
-        ("MobileNet", "/models/mobilenet.pt", "pytorch"),
-    ]
-    
-    for name, path, framework in models_to_register:
-        success = model_registry.register_model(name, path, framework)
-        print(f"  注册 {name}: {'成功' if success else '失败'}")
-    
-    # 2. 列出所有模型
-    print("\n2. 已注册的模型列表:")
+    # 1. 扫描并列出所有可用模型
+    print("\n1. 扫描models/目录中的可用模型:")
     models = model_registry.list_models()
+    
+    if not models:
+        print("  未找到任何模型，请确保在models/目录下有正确格式的模型")
+        return
+        
     for model in models:
         print(f"  - {model['name']} ({model['framework']}) - 状态: {model['status']}")
+        print(f"    模型ID: {model['model_id']}")
         print(f"    路径: {model['path']}")
-        if model['device']:
+        print(f"    类型: {model['model_type']}")
+        print(f"    版本: {model['version']}")
+        print(f"    描述: {model['description']}")
+        if model.get('device'):
             print(f"    设备: {model['device']}")
+        print()
     
-    # 3. 获取特定模型信息
-    print("\n3. 获取特定模型信息:")
-    model_name = "YOLOv5-Small"
-    model_info = model_registry.get_model_info(model_name)
-    if model_info:
-        print(f"  模型名称: {model_info['name']}")
-        print(f"  模型路径: {model_info['path']}")
-        print(f"  框架: {model_info['framework']}")
-        print(f"  状态: {model_info['status']}")
+    # 2. 获取特定模型信息
+    print("\n2. 获取特定模型信息:")
+    first_model_id = models[0]['model_id'] if models else None
+    if first_model_id:
+        model_info = model_registry.get_model_info(first_model_id)
+        if model_info:
+            print(f"  模型名称: {model_info['name']}")
+            print(f"  模型ID: {model_info['model_id']}")
+            print(f"  模型路径: {model_info['path']}")
+            print(f"  框架: {model_info['framework']}")
+            print(f"  状态: {model_info['status']}")
+            print(f"  版本: {model_info['version']}")
+            print(f"  性能指标: {model_info['config'].get('performance', {})}")
     else:
-        print(f"  未找到模型: {model_name}")
+        print("  没有可用模型进行测试")
     
-    # 4. 更新模型状态
-    print("\n4. 更新模型状态:")
-    model_registry.update_model_status("YOLOv5-Small", "running", "cuda:0")
-    model_registry.update_model_status("ResNet18", "running", "cpu")
-    model_registry.update_model_status("EfficientNet", "error")
+    # 3. 更新模型状态
+    print("\n3. 更新模型状态:")
+    if models:
+        test_model_id = models[0]['model_id']
+        model_registry.update_model_status(test_model_id, "running", "cuda:0")
+        print(f"  已将模型 {test_model_id} 状态更新为 running")
+        
+        if len(models) > 1:
+            test_model_id2 = models[1]['model_id']
+            model_registry.update_model_status(test_model_id2, "error")
+            print(f"  已将模型 {test_model_id2} 状态更新为 error")
     
-    print("  状态更新后的模型列表:")
-    models = model_registry.list_models()
-    for model in models:
-        status_emoji = {
-            'running': '🟢',
-            'stopped': '⚪',
-            'error': '🔴'
-        }.get(model['status'], '❓')
-        print(f"  {status_emoji} {model['name']} - {model['status']}")
-        if model['device']:
-            print(f"      设备: {model['device']}")
-        if model['loaded_time']:
-            print(f"      加载时间: {model['loaded_time']}")
+    # 4. 测试模型推理功能
+    print("\n4. 测试模型推理功能:")
+    if models:
+        test_model_id = models[0]['model_id']
+        # 使用样例图像测试
+        sample_image = "app/resources/sample_part1.jpg"
+        if os.path.exists(sample_image):
+            print(f"  使用测试图像: {sample_image}")
+            result = model_registry.test_model(test_model_id, sample_image)
+            
+            if result.get('success', False):
+                print(f"  ✅ 推理成功!")
+                print(f"    模型: {result.get('model_name', 'Unknown')}")
+                print(f"    推理时间: {result.get('inference_time_ms', 0):.2f} ms")
+                
+                # 根据不同类型显示结果
+                if 'detections' in result:
+                    print(f"    检测到 {result.get('num_detections', 0)} 个目标")
+                elif 'anomaly_score' in result:
+                    print(f"    异常分数: {result.get('anomaly_score', 0):.4f}")
+                    print(f"    是否异常: {'是' if result.get('is_anomaly', False) else '否'}")
+            else:
+                print(f"  ❌ 推理失败: {result.get('error', '未知错误')}")
+        else:
+            print(f"  测试图像不存在: {sample_image}")
+    else:
+        print("  没有可用模型进行推理测试")
 
 
 def test_system_info():

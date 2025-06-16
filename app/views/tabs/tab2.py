@@ -232,6 +232,9 @@ class Tab2Widget(QWidget):
         # 启动资源监控
         self.start_resource_monitoring()
         
+        # 初始加载模型列表
+        self.refresh_model_list()
+        
     def create_left_panel(self):
         """创建左侧控制面板"""
         panel = QWidget()
@@ -248,13 +251,6 @@ class Tab2Widget(QWidget):
         self.running_models_list.itemClicked.connect(self.on_model_selected)
         running_layout.addWidget(self.running_models_list)
         
-        # 模拟添加一些运行中的模型
-        running_models = ["YOLO-v5", "ResNet-50", "EfficientNet-B0"]
-        for model in running_models:
-            item = QListWidgetItem(f"🟢 {model}")
-            item.setData(Qt.UserRole, {'name': model, 'status': 'running'})
-            self.running_models_list.addItem(item)
-        
         layout.addWidget(running_group)
         
         # 可用模型
@@ -264,13 +260,6 @@ class Tab2Widget(QWidget):
         self.available_models_list = QListWidget()
         self.available_models_list.itemClicked.connect(self.on_model_selected)
         available_layout.addWidget(self.available_models_list)
-        
-        # 模拟添加一些可用模型
-        available_models = ["MobileNet-v2", "VGG-16", "Inception-v3"]
-        for model in available_models:
-            item = QListWidgetItem(f"⚪ {model}")
-            item.setData(Qt.UserRole, {'name': model, 'status': 'stopped'})
-            self.available_models_list.addItem(item)
         
         layout.addWidget(available_group)
         
@@ -282,19 +271,24 @@ class Tab2Widget(QWidget):
         self.monitor_btn.setEnabled(False)
         self.monitor_btn.clicked.connect(self.toggle_model_monitoring)
         self.monitor_btn.setStyleSheet("""
+            QPushButton {
+                min-height: 25px;
+            }
             QPushButton:enabled {
                 background-color: #4CAF50;
                 color: white;
                 border: none;
-                padding: 10px;
-                border-radius: 5px;
+                padding: 8px 16px;
+                border-radius: 4px;
                 font-weight: bold;
+                font-size: 13px;
             }
             QPushButton:enabled:hover {
                 background-color: #45a049;
             }
             QPushButton:disabled {
                 background-color: #cccccc;
+                color: #666666;
             }
         """)
         control_layout.addWidget(self.monitor_btn)
@@ -559,8 +553,57 @@ class Tab2Widget(QWidget):
         
     def refresh_model_list(self):
         """刷新模型列表"""
-        # TODO: 从后端服务获取最新的模型列表
-        self.logger.info("刷新模型列表")
+        from app.services import model_registry
+        
+        # 清空现有列表
+        self.running_models_list.clear()
+        self.available_models_list.clear()
+        
+        try:
+            models = model_registry.list_models()
+            
+            if not models:
+                # 如果没有模型，添加提示项
+                item = QListWidgetItem("未找到可用模型")
+                item.setData(Qt.UserRole, None)
+                item.setFlags(item.flags() & ~Qt.ItemIsSelectable)
+                self.available_models_list.addItem(item)
+                self.logger.info("未找到可用模型")
+                return
+                
+            for model in models:
+                model_id = model.get('model_id', '')
+                model_name = model.get('name', model_id)
+                model_type = model.get('model_type', 'unknown')
+                status = model.get('status', 'stopped')
+                
+                display_text = f"{model_name}\n[{model_type}]"
+                
+                item = QListWidgetItem()
+                item.setData(Qt.UserRole, {
+                    'name': model_name,
+                    'model_id': model_id,
+                    'status': status,
+                    'type': model_type
+                })
+                
+                # 根据状态分配到不同列表
+                if status == 'running':
+                    item.setText(f"🟢 {display_text}")
+                    self.running_models_list.addItem(item)
+                else:
+                    item.setText(f"⚪ {display_text}")
+                    self.available_models_list.addItem(item)
+                    
+            self.logger.info(f"已刷新模型列表，共 {len(models)} 个模型")
+            
+        except Exception as e:
+            self.logger.error(f"刷新模型列表失败: {str(e)}")
+            # 添加错误提示项
+            error_item = QListWidgetItem(f"加载失败: {str(e)}")
+            error_item.setData(Qt.UserRole, None)
+            error_item.setFlags(error_item.flags() & ~Qt.ItemIsSelectable)
+            self.available_models_list.addItem(error_item)
         
     def log_message(self, message):
         """记录日志"""

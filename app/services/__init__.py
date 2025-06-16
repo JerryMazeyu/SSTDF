@@ -26,6 +26,18 @@ from .monitor import (
     get_model_monitor
 )
 
+# 从config_manager模块导出配置管理接口
+from .config_manager import (
+    config_manager,
+    ConfigManager
+)
+
+# 从detection模块导出检测服务
+from .detection import (
+    detection_service,
+    DetectionService
+)
+
 __all__ = [
     # Common
     'model_registry',
@@ -44,5 +56,13 @@ __all__ = [
     'get_model_inference_stats',
     'get_all_monitoring_models',
     'ModelMonitor',
-    'get_model_monitor'
+    'get_model_monitor',
+    
+    # Config
+    'config_manager',
+    'ConfigManager',
+    
+    # Detection
+    'detection_service',
+    'DetectionService'
 ] 
