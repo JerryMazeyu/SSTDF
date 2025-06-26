@@ -10,6 +10,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 import numpy as np
 from PIL import Image, ImageDraw, ImageFont
 import cv2
+from PIL import Image
 import platform
 
 from app.services import model_registry
@@ -172,7 +173,7 @@ class DetectionService:
     def draw_detections_on_image(self, image_path: str, detections: List[Dict[str, Any]], 
                                output_path: Optional[str] = None,
                                line_thickness: int = 4,
-                               font_size: int = 24) -> np.ndarray:
+                               font_size: int = 20) -> np.ndarray:
         """
         在图像上绘制检测结果
         
@@ -187,15 +188,13 @@ class DetectionService:
             绘制了检测结果的图像数组
         """
         # 读取图像
-        image = cv2.imread(image_path)
-        if image is None:
-            raise ValueError(f"无法读取图像: {image_path}")
-            
-        # 转换为RGB格式（OpenCV默认是BGR）
-        image_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
-        
-        # 创建PIL图像用于绘制
-        pil_image = Image.fromarray(image_rgb)
+        try:
+        # ✅直接使用PIL读取图像，避免冗余转换
+            pil_image = Image.open(image_path).convert("RGB")  # 确保RGB模式
+        except Exception as e:
+            self.logger.error(f"图像读取失败: {image_path}，错误: {str(e)}")
+            raise
+
         draw = ImageDraw.Draw(pil_image)
         
         # 尝试加载中文字体，增加健壮性

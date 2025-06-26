@@ -870,8 +870,8 @@ class Tab1Widget(QWidget):
             detected_image = detection_service.draw_detections_on_image(
                 image_path, 
                 detections,
-                line_thickness=40, # 设置为更明显的值
-                font_size=200       # 设置为更明显的值
+                line_thickness=4, # 设置为更明显的值
+                font_size=20       # 设置为更明显的值
             )
             
             # 将numpy数组转换为QPixmap
@@ -1028,8 +1028,8 @@ class Tab1Widget(QWidget):
                         image_path,
                         detections,
                         output_path=output_path,
-                        line_thickness=10,
-                        font_size=50
+                        line_thickness=4,
+                        font_size=20
                     )
                     exported_count += 1
                 except Exception as e:
