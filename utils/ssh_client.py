@@ -4,6 +4,7 @@ import os
 import paramiko
 import time
 import logging
+import json
 
 logger = logging.getLogger(__name__)
 
@@ -36,8 +37,15 @@ class SSHClient:
             logger.info("成功连接到服务器")
         except Exception as e:
             logger.error(f"连接服务器失败: {str(e)}")
-            raise
+            
     
+    def close(self):
+        """关闭SSH连接"""
+        if self.sftp:
+            self.sftp.close()
+        if self.ssh:
+            self.ssh.close()
+
     def transfer_image_via_paramiko(self, local_image_path:str)->str:
         """
         通过paramiko传输图片到服务器
@@ -103,7 +111,7 @@ class SSHClient:
 
         except Exception as e:
             logger.error(f"下载结果失败: {e}")
-            return None,None
+            raise e
 
         return local_json_result, local_vis_result
 
@@ -141,20 +149,20 @@ process_chain(\\"{remote_image_path}\\", \\"{model_id}\\", \\"{self.process_id}\
                 
             # 等待处理完成
             if not self.wait_for_processing_complete():
-                return None
+                self.close()
+                raise Exception("处理超时")
             else:
                 # 下载结果文件
                 pred_file_path, vis_file_path = self.download_result()
                 
                 return pred_file_path, vis_file_path
-
+        except Exception as e:
+            logger.error(f"处理过程中出现错误: {e}")
+            raise e
         finally:
-            if self.sftp:
-                self.sftp.close()
-            if self.ssh:
-                self.ssh.close()
+            self.close()
 
-    def wait_for_processing_complete(self,max_wait_time: int = 300) -> bool:
+    def wait_for_processing_complete(self,max_wait_time: int = 30) -> bool:
         """
         等待远程处理完成
         Args:
@@ -191,4 +199,27 @@ process_chain(\\"{remote_image_path}\\", \\"{model_id}\\", \\"{self.process_id}\
             str: 处理ID
         """
         return FileNamer.generate_time_based_name()
-
+    
+    def get_remote_server_hardware_resources(self)->dict:
+        """
+        获取远程服务器硬件资源
+        Returns:
+            dict: 远程服务器硬件资源
+        """
+        cmd = f'''bash -l -c 'cd {self.remote_base_path}/monitoring && \
+source /home/zentek/miniconda3/etc/profile.d/conda.sh && \
+conda activate openmmlab && \
+/home/zentek/miniconda3/envs/openmmlab/bin/python3 -c "
+from hardware_resources import HardwareMonitor
+monitor = HardwareMonitor()
+print(monitor.get_hardware_info())"
+' '''
+        stdin, stdout, stderr = self.ssh.exec_command(cmd)
+        result = stdout.read().decode().strip()
+        error = stderr.read().decode().strip()
+        logger.info(f"获取远程服务器硬件资源过程中出现错误: {error}")
+        # 将result中的单引号替换为双引号
+        result = result.replace("'", '"')
+        result_json = json.loads(result)
+        # logger.info(f"获取远程服务器硬件资源: {result_json}")
+        return result_json

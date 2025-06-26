@@ -11,52 +11,61 @@ import logging
 from datetime import datetime
 import psutil
 import random
-
+from utils.ssh_client import SSHClient
 
 class ResourceMonitorThread(QThread):
     """资源监控线程"""
     cpu_updated = pyqtSignal(float)
-    gpu_updated = pyqtSignal(list)  # [GPU使用率, 显存使用率]
+    gpu_updated = pyqtSignal(list)  # [GPU索引, GPU使用率, 显存使用率]
     memory_updated = pyqtSignal(float)
+    gpu_count_updated = pyqtSignal(int)  # 新增信号，用于通知GPU数量
     
     def __init__(self):
         super().__init__()
         self.is_running = True
+        self.ssh_client = SSHClient()
+        self.ssh_client.connect()
+        self.current_gpu_index = 0  # 当前选中的GPU索引
         
     def run(self):
         """持续监控系统资源"""
         while self.is_running:
+            # 获取远程服务器硬件资源
+            remote_hardware_resources = self.ssh_client.get_remote_server_hardware_resources()
             # CPU使用率
-            cpu_percent = psutil.cpu_percent(interval=1)
+            cpu_percent = remote_hardware_resources['cpu_usage']
             self.cpu_updated.emit(cpu_percent)
             
             # 内存使用率
-            memory = psutil.virtual_memory()
-            self.memory_updated.emit(memory.percent)
+            memory_percent = remote_hardware_resources['memory_usage']
+            self.memory_updated.emit(memory_percent)
             
-            # GPU使用率（模拟，实际需要使用pynvml或其他GPU监控库）
-            try:
-                # import pynvml
-                # pynvml.nvmlInit()
-                # handle = pynvml.nvmlDeviceGetHandleByIndex(0)
-                # gpu_util = pynvml.nvmlDeviceGetUtilizationRates(handle)
-                # memory_info = pynvml.nvmlDeviceGetMemoryInfo(handle)
-                # gpu_percent = gpu_util.gpu
-                # memory_percent = (memory_info.used / memory_info.total) * 100
+            # 获取GPU数量并通知UI
+            gpu_count = len(remote_hardware_resources['gpu_info'])
+            self.gpu_count_updated.emit(gpu_count)
+            
+            # 如果当前GPU索引超出范围，重置为0
+            if self.current_gpu_index >= gpu_count:
+                self.current_gpu_index = 0
                 
-                # 模拟GPU数据
-                gpu_percent = random.uniform(20, 80)
-                memory_percent = random.uniform(30, 70)
-                self.gpu_updated.emit([gpu_percent, memory_percent])
-            except:
-                self.gpu_updated.emit([0, 0])
+            # 发送当前选中GPU的信息
+            if gpu_count > 0:
+                gpu_info = remote_hardware_resources['gpu_info'][self.current_gpu_index]
+                gpu_percent = gpu_info['gpu_load']
+                gpu_memory_percent = gpu_info['gpu_memory_used']
+                # 作为列表发送数据
+                self.gpu_updated.emit([self.current_gpu_index, gpu_percent, gpu_memory_percent])
                 
             self.msleep(1000)  # 每秒更新一次
+            
+    def set_gpu_index(self, index):
+        """设置要监控的GPU索引"""
+        self.current_gpu_index = index
             
     def stop(self):
         """停止监控"""
         self.is_running = False
-
+        self.ssh_client.close()
 
 class ModelMonitorThread(QThread):
     """模型监控线程"""
@@ -398,7 +407,7 @@ class Tab2Widget(QWidget):
         
         parent_layout.addLayout(chart_layout)
         
-        # 添加当前值显示
+        # 当前值显示
         values_layout = QHBoxLayout()
         
         self.cpu_label = QLabel("CPU: 0%")
@@ -415,12 +424,51 @@ class Tab2Widget(QWidget):
         
         parent_layout.addLayout(values_layout)
         
+        # GPU选择下拉列表（单独放在GPU信息下方）
+        gpu_select_layout = QHBoxLayout()
+        gpu_select_layout.addStretch()
+        gpu_select_layout.addWidget(QLabel("选择GPU:"))
+        self.gpu_combo = QComboBox()
+        self.gpu_combo.setEnabled(False)  # 初始禁用，等待GPU信息
+        self.gpu_combo.currentIndexChanged.connect(self.on_gpu_selected)
+        self.gpu_combo.setMaximumWidth(120)  # 限制下拉列表宽度
+        gpu_select_layout.addWidget(self.gpu_combo)
+        gpu_select_layout.addStretch()
+        
+        parent_layout.addLayout(gpu_select_layout)
+        
+    def on_gpu_selected(self, index):
+        """处理GPU下拉列表选择事件"""
+        if self.resource_monitor_thread:
+            self.resource_monitor_thread.set_gpu_index(index)
+        
+    def update_gpu_count(self, count):
+        """更新GPU数量"""
+        # 更新下拉列表
+        current_index = self.gpu_combo.currentIndex()
+        self.gpu_combo.clear()
+        
+        if count > 0:
+            for i in range(count):
+                self.gpu_combo.addItem(f"GPU {i}", i)
+            
+            self.gpu_combo.setEnabled(True)
+            
+            # 保持原来选中的GPU，如果可能
+            if current_index >= 0 and current_index < count:
+                self.gpu_combo.setCurrentIndex(current_index)
+            else:
+                self.gpu_combo.setCurrentIndex(0)
+        else:
+            self.gpu_combo.setEnabled(False)
+    
     def start_resource_monitoring(self):
         """启动资源监控"""
         self.resource_monitor_thread = ResourceMonitorThread()
         self.resource_monitor_thread.cpu_updated.connect(self.update_cpu)
         self.resource_monitor_thread.gpu_updated.connect(self.update_gpu)
         self.resource_monitor_thread.memory_updated.connect(self.update_memory)
+        self.resource_monitor_thread.gpu_count_updated.connect(self.update_gpu_count)
         self.resource_monitor_thread.start()
         
     def update_cpu(self, value):
@@ -438,8 +486,8 @@ class Tab2Widget(QWidget):
         
     def update_gpu(self, values):
         """更新GPU使用率"""
-        gpu_percent, memory_percent = values
-        self.gpu_label.setText(f"GPU: {gpu_percent:.1f}% / 显存: {memory_percent:.1f}%")
+        index, gpu_percent, gpu_memory_percent = values
+        self.gpu_label.setText(f"GPU {index}: {gpu_percent:.1f}% / 显存: {gpu_memory_percent:.1f}%")
         
         # 更新历史数据
         if 'gpu_util' not in self.resource_history:
@@ -447,7 +495,7 @@ class Tab2Widget(QWidget):
             self.resource_history['gpu_memory'] = []
             
         self.resource_history['gpu_util'].append(gpu_percent)
-        self.resource_history['gpu_memory'].append(memory_percent)
+        self.resource_history['gpu_memory'].append(gpu_memory_percent)
         
         if len(self.resource_history['gpu_util']) > self.max_history_points:
             self.resource_history['gpu_util'].pop(0)
