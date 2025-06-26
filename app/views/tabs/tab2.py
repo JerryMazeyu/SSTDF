@@ -76,51 +76,97 @@ class ModelMonitorThread(QThread):
     def __init__(self, model_name, model_path=None):
         super().__init__()
         self.model_name = model_name
-        self.model_path = model_path
+        self.model_id = model_name  # 使用模型名称作为模型ID
         self.is_running = True
+        self.ssh_client = SSHClient()
+        self.ssh_client.connect()
         
     def run(self):
         """监控模型运行状态"""
         while self.is_running:
-            # 模拟获取特征图
-            # 实际应该调用模型服务获取真实的特征图
-            feature_maps = self.simulate_feature_maps()
-            self.feature_map_updated.emit(feature_maps)
-            
-            # 模拟模型状态
-            status = {
-                'running': True,
-                'fps': random.uniform(25, 35),
-                'latency': random.uniform(10, 50),
-                'accuracy': random.uniform(0.85, 0.99),
-                'error_rate': random.uniform(0, 0.05)
-            }
-            self.model_status_updated.emit(self.model_name, status)
-            
-            self.msleep(2000)  # 每2秒更新一次
-            
-    def simulate_feature_maps(self):
-        """模拟生成特征图"""
-        # 实际应该从模型中提取真实的特征图
-        feature_maps = {}
-        layers = ['conv1', 'conv2', 'conv3', 'fc1']
-        
-        for layer in layers:
-            # 生成随机特征图数据
-            if 'conv' in layer:
-                # 卷积层特征图
-                feature_map = np.random.randn(64, 64) * 255
-            else:
-                # 全连接层特征
-                feature_map = np.random.randn(16, 16) * 255
+            try:
+                # 获取远程服务器上的特征图
+                feature_maps = self.fetch_feature_maps()
+                self.feature_map_updated.emit(feature_maps)
                 
-            feature_maps[layer] = feature_map.astype(np.uint8)
+                # 模拟模型状态（实际应该从服务端获取）
+                status = {
+                    'running': True,
+                    'fps': random.uniform(25, 35),
+                    'latency': random.uniform(10, 50),
+                    'accuracy': random.uniform(0.85, 0.99),
+                    'error_rate': random.uniform(0, 0.05)
+                }
+                self.model_status_updated.emit(self.model_name, status)
+                
+            except Exception as e:
+                self.log_message.emit(f"获取特征图失败: {str(e)}")
+                # 发送空特征图数据
+                self.feature_map_updated.emit({'backbone': None, 'neck': None})
+                
+            self.msleep(5000)  # 每3秒更新一次
+        
+    def fetch_feature_maps(self):
+        """从远程服务器获取特征图"""
+        feature_maps = {'backbone': None, 'neck': None}
+        
+        # 特征图路径
+        backbone_path = f"/home/zentek/MMDetection/api_server/monitoring/features_map/{self.model_id}/backbone.png"
+        neck_path = f"/home/zentek/MMDetection/api_server/monitoring/features_map/{self.model_id}/neck.png"
+        
+        # 临时保存路径
+        local_backbone_path = f"temp_backbone_{self.model_id}.png"
+        local_neck_path = f"temp_neck_{self.model_id}.png"
+        
+        try:
+            # 尝试通过SFTP从远程服务器下载特征图
+            # backbone特征图
+            try:
+                self.ssh_client.sftp.get(backbone_path, local_backbone_path)
+                pixmap = QPixmap(local_backbone_path)
+                if not pixmap.isNull():
+                    feature_maps['backbone'] = pixmap
+                    self.log_message.emit(f"获取backbone特征图成功")
+                else:
+                    self.log_message.emit(f"backbone特征图加载失败")
+            except Exception as e:
+                self.log_message.emit(f"未找到backbone特征图: {str(e)}")
+                
+            # neck特征图
+            try:
+                self.ssh_client.sftp.get(neck_path, local_neck_path)
+                pixmap = QPixmap(local_neck_path)
+                if not pixmap.isNull():
+                    feature_maps['neck'] = pixmap
+                    self.log_message.emit(f"获取neck特征图成功")
+                else:
+                    self.log_message.emit(f"neck特征图加载失败")
+            except Exception as e:
+                self.log_message.emit(f"未找到neck特征图: {str(e)}")
+                
+            # 删除临时文件
+            try:
+                import os
+                if os.path.exists(local_backbone_path):
+                    os.remove(local_backbone_path)
+                if os.path.exists(local_neck_path):
+                    os.remove(local_neck_path)
+            except Exception as e:
+                self.log_message.emit(f"删除临时文件失败: {str(e)}")
+                
+        except Exception as e:
+            self.log_message.emit(f"获取特征图发生异常: {str(e)}")
             
         return feature_maps
         
     def stop(self):
         """停止监控"""
         self.is_running = False
+        if hasattr(self, 'ssh_client'):
+            try:
+                self.ssh_client.close()
+            except:
+                pass
 
 
 class FeatureMapWidget(QWidget):
@@ -138,25 +184,24 @@ class FeatureMapWidget(QWidget):
         
         # 创建特征图显示标签
         self.feature_labels = {}
-        self.layer_names = ['conv1', 'conv2', 'conv3', 'fc1']
+        self.layer_names = ['backbone', 'neck']
         
         for i, layer_name in enumerate(self.layer_names):
-            row = i // 2
-            col = i % 2
+            col = i
             
             # 创建组框
-            group = QGroupBox(f"Layer: {layer_name}")
+            group = QGroupBox(f"特征图: {layer_name}")
             group_layout = QVBoxLayout(group)
             
             # 创建图像标签
-            label = QLabel()
-            label.setMinimumSize(200, 200)
+            label = QLabel("无数据")
+            label.setMinimumSize(350, 350)  # 调整大小使特征图更明显
             label.setScaledContents(True)
             label.setStyleSheet("QLabel { background-color: #f0f0f0; border: 1px solid #ddd; }")
             label.setAlignment(Qt.AlignCenter)
             
             group_layout.addWidget(label)
-            layout.addWidget(group, row, col)
+            layout.addWidget(group, 0, col)
             
             self.feature_labels[layer_name] = label
             
@@ -164,32 +209,21 @@ class FeatureMapWidget(QWidget):
         """更新特征图显示"""
         self.feature_maps = feature_maps
         
-        for layer_name, feature_map in feature_maps.items():
+        for layer_name, pixmap in feature_maps.items():
             if layer_name in self.feature_labels:
-                # 将numpy数组转换为QPixmap
-                height, width = feature_map.shape
-                
-                # 归一化到0-255
-                normalized = ((feature_map - feature_map.min()) / 
-                             (feature_map.max() - feature_map.min() + 1e-8) * 255).astype(np.uint8)
-                
-                # 创建QImage
-                from PyQt5.QtGui import QImage
-                
-                # 转换为RGB格式
-                rgb_array = np.stack([normalized] * 3, axis=2)
-                
-                image = QImage(rgb_array.data, width, height, 3 * width, QImage.Format_RGB888)
-                pixmap = QPixmap.fromImage(image)
-                
-                # 缩放到标签大小
-                scaled_pixmap = pixmap.scaled(
-                    self.feature_labels[layer_name].size(),
-                    Qt.KeepAspectRatio,
-                    Qt.SmoothTransformation
-                )
-                
-                self.feature_labels[layer_name].setPixmap(scaled_pixmap)
+                if pixmap and not pixmap.isNull():
+                    # 缩放到标签大小
+                    scaled_pixmap = pixmap.scaled(
+                        self.feature_labels[layer_name].size(),
+                        Qt.KeepAspectRatio,
+                        Qt.SmoothTransformation
+                    )
+                    self.feature_labels[layer_name].setPixmap(scaled_pixmap)
+                    self.feature_labels[layer_name].setText("")  # 清除文本
+                else:
+                    self.feature_labels[layer_name].clear()  # 清除现有的pixmap
+                    self.feature_labels[layer_name].setText("无数据")
+                    self.feature_labels[layer_name].setStyleSheet("QLabel { background-color: #f0f0f0; border: 1px solid #ddd; }")
 
 
 class Tab2Widget(QWidget):
@@ -540,12 +574,13 @@ class Tab2Widget(QWidget):
             
         if self.selected_model in self.model_monitor_threads:
             # 停止监控
-            thread = self.model_monitor_threads[self.selected_model]
-            thread.stop()
-            thread.wait()
-            del self.model_monitor_threads[self.selected_model]
+            self.monitor_btn.setEnabled(False)  # 暂时禁用按钮，防止重复点击
+            self.monitor_btn.setText("正在停止...")
             
-            self.monitor_btn.setText("开始监控")
+            thread = self.model_monitor_threads[self.selected_model]
+            thread.stop()  # 设置停止标志
+            
+            # 确保在主线程中清理UI
             self.current_model_label.setText("请选择要监控的模型")
             
             # 清除该模型的状态信息
@@ -553,6 +588,21 @@ class Tab2Widget(QWidget):
                 if self.status_table.item(row, 0).text() == self.selected_model:
                     self.status_table.removeRow(row)
                     break
+            
+            # 清空特征图显示
+            self.feature_map_widget.update_feature_maps({'backbone': None, 'neck': None})
+            
+            # 等待线程终止（最多等待3秒）
+            if not thread.wait(3000):
+                self.logger.warning(f"监控线程未能在预期时间内终止，正在强制终止")
+                thread.terminate()  # 强制终止线程
+                thread.wait()
+                
+            # 移除线程引用
+            del self.model_monitor_threads[self.selected_model]
+            
+            self.monitor_btn.setText("开始监控")
+            self.monitor_btn.setEnabled(True)
                     
         else:
             # 开始监控
@@ -565,7 +615,7 @@ class Tab2Widget(QWidget):
             self.model_monitor_threads[self.selected_model] = thread
             self.monitor_btn.setText("停止监控")
             self.current_model_label.setText(f"正在监控: {self.selected_model}")
-            
+        
     def update_feature_maps(self, feature_maps):
         """更新特征图显示"""
         self.feature_map_widget.update_feature_maps(feature_maps)
