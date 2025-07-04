@@ -217,7 +217,7 @@ print(monitor.get_hardware_info())"
         stdin, stdout, stderr = self.ssh.exec_command(cmd)
         result = stdout.read().decode().strip()
         error = stderr.read().decode().strip()
-        logger.info(f"获取远程服务器硬件资源过程中出现错误: {error}")
+        # logger.info(f"获取远程服务器硬件资源过程中出现错误: {error}")
         # 将result中的单引号替换为双引号
         result = result.replace("'", '"')
         result_json = json.loads(result)
