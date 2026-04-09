@@ -39,7 +39,7 @@ class MainWindow(QMainWindow):
         
     def init_ui(self):
         """初始化用户界面"""
-        self.setWindowTitle("智能模型监控与优化系统")
+        self.setWindowTitle("残余物智能处理系统")
         
         # 先设置一个合理的初始大小
         self.setGeometry(100, 100, 1200, 800)
@@ -127,21 +127,21 @@ class MainWindow(QMainWindow):
             placeholder2 = QWidget()
             self.tab_widget.addTab(placeholder2, "状态监控")
             
-        # Tab 3: 趋势预测
-        if Tab3Widget:
-            self.tab3 = Tab3Widget()
-            self.tab_widget.addTab(self.tab3, "趋势预测")
-        else:
-            placeholder3 = QWidget()
-            self.tab_widget.addTab(placeholder3, "趋势预测")
+        # # Tab 3: 趋势预测
+        # if Tab3Widget:
+        #     self.tab3 = Tab3Widget()
+        #     self.tab_widget.addTab(self.tab3, "趋势预测")
+        # else:
+        #     placeholder3 = QWidget()
+        #     self.tab_widget.addTab(placeholder3, "趋势预测")
             
-        # Tab 4: 模型剪枝
-        if Tab4Widget:
-            self.tab4 = Tab4Widget()
-            self.tab_widget.addTab(self.tab4, "模型剪枝")
-        else:
-            placeholder4 = QWidget()
-            self.tab_widget.addTab(placeholder4, "模型剪枝")
+        # # Tab 4: 模型剪枝
+        # if Tab4Widget:
+        #     self.tab4 = Tab4Widget()
+        #     self.tab_widget.addTab(self.tab4, "模型剪枝")
+        # else:
+        #     placeholder4 = QWidget()
+        #     self.tab_widget.addTab(placeholder4, "模型剪枝")
     
     def show_settings_menu(self):
         """显示设置菜单"""

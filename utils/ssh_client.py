@@ -56,14 +56,14 @@ class SSHClient:
         """
         # 获取local_image_path的文件类型
         self.file_type = os.path.splitext(local_image_path)[1]
-        logger.info("本地文件类型", self.file_type)
+        logger.info("本地文件类型: %s", self.file_type)
 
         # 拼接remote_path
         image_name = self.process_id + self.file_type
 
         self.remote_image_path = os.path.join(self.remote_image_path, image_name).replace('\\', '/')
 
-        logger.info("远程文件路径", self.remote_image_path)
+        logger.info("远程文件路径: %s", self.remote_image_path)
 
         
         try:
